@@ -124,7 +124,7 @@ async function load() {
             ${r.description ? `<div class="review-desc">${escHtml(r.description)}</div>` : ''}
             <div style="font-size:12px;color:#888;margin-bottom:8px">包含景点：</div>
             <div class="spot-tags">${spots.map(s => `<span class="spot-tag">${escHtml(s.spotName||s.name||'景点')}</span>`).join('')||'<span style="color:#ccc;font-size:12px">无</span>'}</div>
-            ${r.rejectReason ? `<div style="margin-top:8px;font-size:12px;color:#ff4d4f"><i class="fas fa-comment-dots"></i> 驳回原因：${escHtml(r.rejectReason)}</div>` : ''}
+            ${r.status === 'REJECTED' && r.rejectReason ? `<div style="margin-top:8px;font-size:12px;color:#ff4d4f"><i class="fas fa-comment-dots"></i> 驳回原因：${escHtml(r.rejectReason)}</div>` : ''}
             ${r.status === 'SUBMITTED' ? `
             <div class="review-actions" style="margin-top:12px">
                 <button class="btn btn-danger btn-sm" onclick="openReject(${r.id})"><i class="fas fa-times"></i> 驳回</button>
@@ -139,7 +139,8 @@ function statusLabel(s) { return {SUBMITTED:'待审核',APPROVED:'已通过',REJ
 async function doApprove(id) {
     showConfirm('确定将该线路纳入官方推荐？', async () => {
         const res = await api(`/api/admin/customRoute/approve?id=${id}`);
-        if (res) { showToast('已通过，已通知用户'); load(); }
+        if (res) showToast('已通过，已通知用户');
+        load();
     });
 }
 function openReject(id) { document.getElementById('rejectId').value=id; document.getElementById('rejectReason').value=''; document.getElementById('rejectModal').style.display='flex'; }
@@ -149,7 +150,9 @@ async function doReject() {
     const reason = document.getElementById('rejectReason').value.trim();
     if (!reason) { showToast('请输入驳回原因','error'); return; }
     const res = await api(`/api/admin/customRoute/reject?id=${id}&reason=${encodeURIComponent(reason)}`);
-    if (res) { closeReject(); showToast('已驳回，已通知用户'); load(); }
+    closeReject();
+    if (res) showToast('已驳回，已通知用户');
+    load();
 }
 load();
 </script>

@@ -607,8 +607,15 @@ public class AdminController {
     public Result<String> approveCustomRoute(@RequestParam Long id) {
         UserCustomRoute route = customRouteMapper.selectById(id);
         if (route == null) return Result.error("线路不存在");
-        route.setStatus("APPROVED");
-        customRouteMapper.updateById(route);
+        // 仅处理待审核的线路；条件更新保证与用户撤回并发时只有一方生效
+        com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<UserCustomRoute> w =
+                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<>();
+        w.eq(UserCustomRoute::getId, id)
+         .eq(UserCustomRoute::getStatus, "SUBMITTED")
+         .set(UserCustomRoute::getStatus, "APPROVED")
+         .set(UserCustomRoute::getUpdateTime, new Date());
+        int rows = customRouteMapper.update(null, w);
+        if (rows == 0) return Result.error("该线路已被用户撤回或状态已变化，请刷新后重试");
         messageService.sendMessage(route.getUserId(), "您的自定义线路已被采纳为官方推荐",
                 "恭喜！您创建的线路【" + route.getName() + "】已通过审核，被纳入官方推荐线路。");
         return Result.success("已通过", null);
@@ -618,9 +625,15 @@ public class AdminController {
     public Result<String> rejectCustomRoute(@RequestParam Long id, @RequestParam String reason) {
         UserCustomRoute route = customRouteMapper.selectById(id);
         if (route == null) return Result.error("线路不存在");
-        route.setStatus("REJECTED");
-        route.setRejectReason(reason);
-        customRouteMapper.updateById(route);
+        com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<UserCustomRoute> w =
+                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<>();
+        w.eq(UserCustomRoute::getId, id)
+         .eq(UserCustomRoute::getStatus, "SUBMITTED")
+         .set(UserCustomRoute::getStatus, "REJECTED")
+         .set(UserCustomRoute::getRejectReason, reason)
+         .set(UserCustomRoute::getUpdateTime, new Date());
+        int rows = customRouteMapper.update(null, w);
+        if (rows == 0) return Result.error("该线路已被用户撤回或状态已变化，请刷新后重试");
         messageService.sendMessage(route.getUserId(), "您的自定义线路未通过审核",
                 "您提交的线路【" + route.getName() + "】未通过审核。原因：" + reason);
         return Result.success("已驳回", null);
