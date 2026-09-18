@@ -591,8 +591,9 @@ public class AdminController {
             @RequestParam(required = false) String status) {
         com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<UserCustomRoute> w =
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
-        if (status != null && !status.isEmpty()) w.eq(UserCustomRoute::getStatus, status);
-        else w.eq(UserCustomRoute::getStatus, "SUBMITTED");
+        if (status == null) w.eq(UserCustomRoute::getStatus, "SUBMITTED");
+        else if (!status.isEmpty()) w.eq(UserCustomRoute::getStatus, status);
+        // status 为空串（前端"全部"）时不过滤状态
         w.orderByDesc(UserCustomRoute::getCreateTime);
         com.baomidou.mybatisplus.core.metadata.IPage<UserCustomRoute> result =
                 customRouteMapper.selectPage(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(page, size), w);
@@ -605,10 +606,21 @@ public class AdminController {
 
     @GetMapping("/customRoute/approve")
     public Result<String> approveCustomRoute(@RequestParam Long id) {
+        // 条件更新：仅审核中的线路可通过，用户已撤回/已处理的不再生效，保证与用户端入口状态一致
+        com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<UserCustomRoute> uw =
+                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<>();
+        uw.eq(UserCustomRoute::getId, id)
+          .eq(UserCustomRoute::getStatus, "SUBMITTED")
+          .set(UserCustomRoute::getStatus, "APPROVED")
+          .set(UserCustomRoute::getRejectReason, null)
+          .set(UserCustomRoute::getUpdateTime, new Date());
+        int rows = customRouteMapper.update(null, uw);
+        if (rows == 0) {
+            UserCustomRoute cur = customRouteMapper.selectById(id);
+            if (cur == null) return Result.error("线路不存在");
+            return Result.error("该线路已被用户撤回或已处理，请刷新列表");
+        }
         UserCustomRoute route = customRouteMapper.selectById(id);
-        if (route == null) return Result.error("线路不存在");
-        route.setStatus("APPROVED");
-        customRouteMapper.updateById(route);
         messageService.sendMessage(route.getUserId(), "您的自定义线路已被采纳为官方推荐",
                 "恭喜！您创建的线路【" + route.getName() + "】已通过审核，被纳入官方推荐线路。");
         return Result.success("已通过", null);
@@ -616,11 +628,21 @@ public class AdminController {
 
     @GetMapping("/customRoute/reject")
     public Result<String> rejectCustomRoute(@RequestParam Long id, @RequestParam String reason) {
+        // 条件更新：仅审核中的线路可驳回，用户已撤回/已处理的不再生效
+        com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<UserCustomRoute> uw =
+                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<>();
+        uw.eq(UserCustomRoute::getId, id)
+          .eq(UserCustomRoute::getStatus, "SUBMITTED")
+          .set(UserCustomRoute::getStatus, "REJECTED")
+          .set(UserCustomRoute::getRejectReason, reason)
+          .set(UserCustomRoute::getUpdateTime, new Date());
+        int rows = customRouteMapper.update(null, uw);
+        if (rows == 0) {
+            UserCustomRoute cur = customRouteMapper.selectById(id);
+            if (cur == null) return Result.error("线路不存在");
+            return Result.error("该线路已被用户撤回或已处理，请刷新列表");
+        }
         UserCustomRoute route = customRouteMapper.selectById(id);
-        if (route == null) return Result.error("线路不存在");
-        route.setStatus("REJECTED");
-        route.setRejectReason(reason);
-        customRouteMapper.updateById(route);
         messageService.sendMessage(route.getUserId(), "您的自定义线路未通过审核",
                 "您提交的线路【" + route.getName() + "】未通过审核。原因：" + reason);
         return Result.success("已驳回", null);

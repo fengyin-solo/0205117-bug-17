@@ -1,6 +1,7 @@
 package com.redtourism.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.redtourism.common.Constants;
 import com.redtourism.common.Result;
 import com.redtourism.entity.User;
@@ -54,24 +55,44 @@ public class CustomRouteController {
         User user = getUser(session);
         if (user == null) return Result.error(401, "请先登录");
 
-        UserCustomRoute route;
         if (id != null) {
-            route = routeMapper.selectById(id);
-            if (route == null || !route.getUserId().equals(user.getId()))
-                return Result.error("线路不存在");
-            route.setUpdateTime(new Date());
-        } else {
-            route = new UserCustomRoute();
-            route.setUserId(user.getId());
-            route.setCreateTime(new Date());
-            route.setUpdateTime(new Date());
+            // 仅草稿/已驳回可修改；审核中需先撤回，已通过不可修改。
+            // 条件更新保证与并发提交/撤回/审核操作互斥，只有一个能生效。
+            LambdaUpdateWrapper<UserCustomRoute> uw = new LambdaUpdateWrapper<>();
+            uw.eq(UserCustomRoute::getId, id)
+              .eq(UserCustomRoute::getUserId, user.getId())
+              .and(w -> w.eq(UserCustomRoute::getStatus, "DRAFT")
+                         .or().eq(UserCustomRoute::getStatus, "REJECTED")
+                         .or().isNull(UserCustomRoute::getStatus))
+              .set(UserCustomRoute::getName, name)
+              .set(UserCustomRoute::getDescription, description)
+              .set(UserCustomRoute::getDays, days)
+              .set(UserCustomRoute::getSpotData, spotData)
+              .set(UserCustomRoute::getUpdateTime, new Date());
+            int rows = routeMapper.update(null, uw);
+            if (rows == 0) {
+                UserCustomRoute cur = routeMapper.selectById(id);
+                if (cur == null || !cur.getUserId().equals(user.getId()))
+                    return Result.error("线路不存在");
+                if ("SUBMITTED".equals(cur.getStatus()))
+                    return Result.error("线路正在审核中，请先撤回到草稿再修改");
+                if ("APPROVED".equals(cur.getStatus()))
+                    return Result.error("线路已通过审核并纳入推荐，不可修改");
+                return Result.error("当前状态不可修改");
+            }
+            return Result.success(routeMapper.selectById(id));
         }
+
+        UserCustomRoute route = new UserCustomRoute();
+        route.setUserId(user.getId());
         route.setName(name);
         route.setDescription(description);
         route.setDays(days);
         route.setSpotData(spotData);
-        if (id != null) routeMapper.updateById(route);
-        else routeMapper.insert(route);
+        route.setStatus("DRAFT");
+        route.setCreateTime(new Date());
+        route.setUpdateTime(new Date());
+        routeMapper.insert(route);
         return Result.success(route);
     }
 
@@ -80,23 +101,79 @@ public class CustomRouteController {
     public Result<String> submitForReview(@RequestParam Long id, HttpSession session) {
         User user = getUser(session);
         if (user == null) return Result.error(401, "请先登录");
-        UserCustomRoute route = routeMapper.selectById(id);
-        if (route == null || !route.getUserId().equals(user.getId()))
-            return Result.error("线路不存在");
-        route.setStatus("SUBMITTED");
-        route.setUpdateTime(new Date());
-        routeMapper.updateById(route);
+        // 仅草稿/已驳回可提交；提交时清空历史驳回原因，避免残留显示。
+        // 条件更新保证并发重复提交/并发撤回只有一个成功。
+        LambdaUpdateWrapper<UserCustomRoute> uw = new LambdaUpdateWrapper<>();
+        uw.eq(UserCustomRoute::getId, id)
+          .eq(UserCustomRoute::getUserId, user.getId())
+          .and(w -> w.eq(UserCustomRoute::getStatus, "DRAFT")
+                     .or().eq(UserCustomRoute::getStatus, "REJECTED")
+                     .or().isNull(UserCustomRoute::getStatus))
+          .set(UserCustomRoute::getStatus, "SUBMITTED")
+          .set(UserCustomRoute::getRejectReason, null)
+          .set(UserCustomRoute::getUpdateTime, new Date());
+        int rows = routeMapper.update(null, uw);
+        if (rows == 0) {
+            UserCustomRoute cur = routeMapper.selectById(id);
+            if (cur == null || !cur.getUserId().equals(user.getId()))
+                return Result.error("线路不存在");
+            if ("SUBMITTED".equals(cur.getStatus()))
+                return Result.error("线路已在审核中，请勿重复提交");
+            if ("APPROVED".equals(cur.getStatus()))
+                return Result.error("线路已通过审核，无需重复提交");
+            return Result.error("当前状态不可提交");
+        }
         return Result.success("已提交审核，等待管理员处理", null);
+    }
+
+    /** 用户撤回审核中的线路回到草稿（仅变更状态，线路名称与已选景点保持原样） */
+    @GetMapping("/withdraw")
+    public Result<String> withdraw(@RequestParam Long id, HttpSession session) {
+        User user = getUser(session);
+        if (user == null) return Result.error(401, "请先登录");
+        // 条件更新：仅审核中可撤回；与并发提交/审核操作互斥
+        LambdaUpdateWrapper<UserCustomRoute> uw = new LambdaUpdateWrapper<>();
+        uw.eq(UserCustomRoute::getId, id)
+          .eq(UserCustomRoute::getUserId, user.getId())
+          .eq(UserCustomRoute::getStatus, "SUBMITTED")
+          .set(UserCustomRoute::getStatus, "DRAFT")
+          .set(UserCustomRoute::getUpdateTime, new Date());
+        int rows = routeMapper.update(null, uw);
+        if (rows == 0) {
+            UserCustomRoute cur = routeMapper.selectById(id);
+            if (cur == null || !cur.getUserId().equals(user.getId()))
+                return Result.error("线路不存在");
+            if ("APPROVED".equals(cur.getStatus()))
+                return Result.error("线路已通过审核，无法撤回");
+            if ("REJECTED".equals(cur.getStatus()))
+                return Result.error("线路已被驳回，无需撤回");
+            return Result.error("线路不在审核中，无需撤回");
+        }
+        return Result.success("已撤回到草稿，可修改后重新提交", null);
     }
 
     @GetMapping("/delete")
     public Result<String> delete(@RequestParam Long id, HttpSession session) {
         User user = getUser(session);
         if (user == null) return Result.error(401, "请先登录");
-        UserCustomRoute route = routeMapper.selectById(id);
-        if (route == null || !route.getUserId().equals(user.getId()))
-            return Result.error("线路不存在");
-        routeMapper.deleteById(id);
+        // 仅草稿/已驳回可删除；审核中需先撤回，已通过不可删除
+        LambdaQueryWrapper<UserCustomRoute> qw = new LambdaQueryWrapper<>();
+        qw.eq(UserCustomRoute::getId, id)
+          .eq(UserCustomRoute::getUserId, user.getId())
+          .and(w -> w.eq(UserCustomRoute::getStatus, "DRAFT")
+                     .or().eq(UserCustomRoute::getStatus, "REJECTED")
+                     .or().isNull(UserCustomRoute::getStatus));
+        int rows = routeMapper.delete(qw);
+        if (rows == 0) {
+            UserCustomRoute cur = routeMapper.selectById(id);
+            if (cur == null || !cur.getUserId().equals(user.getId()))
+                return Result.error("线路不存在");
+            if ("SUBMITTED".equals(cur.getStatus()))
+                return Result.error("线路正在审核中，请先撤回再删除");
+            if ("APPROVED".equals(cur.getStatus()))
+                return Result.error("线路已通过审核并纳入推荐，不可删除");
+            return Result.error("当前状态不可删除");
+        }
         return Result.success("删除成功", null);
     }
 }

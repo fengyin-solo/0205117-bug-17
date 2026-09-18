@@ -139,7 +139,8 @@ function statusLabel(s) { return {SUBMITTED:'待审核',APPROVED:'已通过',REJ
 async function doApprove(id) {
     showConfirm('确定将该线路纳入官方推荐？', async () => {
         const res = await api(`/api/admin/customRoute/approve?id=${id}`);
-        if (res) { showToast('已通过，已通知用户'); load(); }
+        if (res) { showToast('已通过，已通知用户'); }
+        load();
     });
 }
 function openReject(id) { document.getElementById('rejectId').value=id; document.getElementById('rejectReason').value=''; document.getElementById('rejectModal').style.display='flex'; }
@@ -149,7 +150,8 @@ async function doReject() {
     const reason = document.getElementById('rejectReason').value.trim();
     if (!reason) { showToast('请输入驳回原因','error'); return; }
     const res = await api(`/api/admin/customRoute/reject?id=${id}&reason=${encodeURIComponent(reason)}`);
-    if (res) { closeReject(); showToast('已驳回，已通知用户'); load(); }
+    if (res) { closeReject(); showToast('已驳回，已通知用户'); }
+    load();
 }
 load();
 </script>

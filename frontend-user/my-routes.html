@@ -137,6 +137,27 @@ async function loadRoutes() {
     }
     wrap.innerHTML = `<div class="route-cards">${data.map(r => {
         const spots = safeJson(r.spotData, []);
+        const st = r.status || 'DRAFT';
+        const badgeStyle = {SUBMITTED:'background:#fff7e6;color:#d48806',APPROVED:'background:#f6ffed;color:#52c41a',REJECTED:'background:#fff1f0;color:#ff4d4f',DRAFT:'background:#f5f5f5;color:#999'}[st];
+        const badgeText = {SUBMITTED:'待审核',APPROVED:'已推荐',REJECTED:'已驳回',DRAFT:'草稿'}[st] || st;
+        // 操作入口与状态保持一致：审核中只能撤回（不可改/删），已推荐不可改/删
+        let actions = '';
+        if (st === 'DRAFT' || st === 'REJECTED') {
+            actions = `
+                    <button class="btn-primary" style="flex:1;padding:7px;border-radius:7px;border:none;cursor:pointer;font-size:13px" onclick="openEditor(${r.id})">
+                        <i class="fas fa-edit"></i> 编辑
+                    </button>
+                    <button style="flex:1;padding:7px;border-radius:7px;border:1px solid #c41a1a;background:#fff;color:#c41a1a;cursor:pointer;font-size:13px" onclick="submitForReview(${r.id})"><i class="fas fa-paper-plane"></i> ${st === 'REJECTED' ? '重新申请' : '申请推荐'}</button>
+                    <button style="padding:7px 14px;border-radius:7px;border:1px solid #ffccc7;background:#fff0f0;color:#ff4d4f;cursor:pointer;font-size:13px" onclick="delRoute(${r.id})">
+                        <i class="fas fa-trash"></i>
+                    </button>`;
+        } else if (st === 'SUBMITTED') {
+            actions = `
+                    <button style="flex:1;padding:7px;border-radius:7px;border:1px solid #d48806;background:#fff;color:#d48806;cursor:pointer;font-size:13px" onclick="withdrawRoute(${r.id})"><i class="fas fa-undo"></i> 撤回</button>
+                    <span style="flex:2;align-self:center;font-size:12px;color:#999">审核中不可修改，如需修改请先撤回</span>`;
+        } else if (st === 'APPROVED') {
+            actions = `<span style="flex:1;align-self:center;font-size:12px;color:#52c41a"><i class="fas fa-check-circle"></i> 已纳入官方推荐，不可修改</span>`;
+        }
         return `<div class="route-card">
             <div style="background:linear-gradient(135deg,#c41a1a,#8b0000);height:5px"></div>
             <div class="route-card-body">
@@ -149,15 +170,8 @@ async function loadRoutes() {
                 ${r.description ? `<div class="route-card-desc">${r.description}</div>` : ''}
                 <div style="margin-bottom:12px">${spots.slice(0,5).map(s=>`<span class="spot-tag">${s.spotName||s.name||'景点'}</span>`).join('')}
                 ${spots.length>5?`<span class="spot-tag" style="background:#f5f5f5;color:#aaa">+${spots.length-5}</span>`:''}</div>
-                ${r.status && r.status !== 'DRAFT' ? `<div style="margin-bottom:8px;font-size:12px"><span style="padding:2px 10px;border-radius:10px;font-weight:600;${r.status==='SUBMITTED'?'background:#fff7e6;color:#d48806':r.status==='APPROVED'?'background:#f6ffed;color:#52c41a':'background:#fff1f0;color:#ff4d4f'}">${{SUBMITTED:'待审核',APPROVED:'已推荐',REJECTED:'已驳回',DRAFT:'草稿'}[r.status]||r.status}</span>${r.rejectReason?` <span style="color:#ff4d4f;font-size:11px">原因：${r.rejectReason}</span>`:''}</div>` : ''}
-                <div class="route-card-actions">
-                    <button class="btn-primary" style="flex:1;padding:7px;border-radius:7px;border:none;cursor:pointer;font-size:13px" onclick="openEditor(${r.id})">
-                        <i class="fas fa-edit"></i> 编辑
-                    </button>
-                    ${!r.status || r.status === 'DRAFT' || r.status === 'REJECTED' ? `<button style="flex:1;padding:7px;border-radius:7px;border:1px solid #c41a1a;background:#fff;color:#c41a1a;cursor:pointer;font-size:13px" onclick="submitForReview(${r.id})"><i class="fas fa-paper-plane"></i> 申请推荐</button>` : ''}
-                    <button style="padding:7px 14px;border-radius:7px;border:1px solid #ffccc7;background:#fff0f0;color:#ff4d4f;cursor:pointer;font-size:13px" onclick="delRoute(${r.id})">
-                        <i class="fas fa-trash"></i>
-                    </button>
+                <div style="margin-bottom:8px;font-size:12px"><span style="padding:2px 10px;border-radius:10px;font-weight:600;${badgeStyle}">${badgeText}</span>${st==='REJECTED'&&r.rejectReason?` <span style="color:#ff4d4f;font-size:11px">原因：${r.rejectReason}</span>`:''}</div>
+                <div class="route-card-actions">${actions}
                 </div>
             </div>
         </div>`;
@@ -238,20 +252,32 @@ async function saveRoute() {
     });
     if (id) params.set('id', id);
     const res = await api('/api/customRoute/save?' + params.toString());
-    if (res) { closeEditor(); showToast('保存成功'); loadRoutes(); }
+    if (res) { showToast('保存成功'); }
+    closeEditor();
+    loadRoutes();
 }
 
 async function delRoute(id) {
     showConfirm('确定删除该线路？', async () => {
         const res = await api('/api/customRoute/delete?id=' + id);
-        if (res) { showToast('已删除'); loadRoutes(); }
+        if (res) { showToast('已删除'); }
+        loadRoutes();
     });
 }
 
 async function submitForReview(id) {
-    showConfirm('确定将此线路提交审核？通过后将被纳入官方推荐线路。', async () => {
+    showConfirm('确定将此线路提交审核？提交后不可修改，通过后将被纳入官方推荐线路。', async () => {
         const res = await api('/api/customRoute/submitForReview?id=' + id);
-        if (res) { showToast('已提交审核，请等待管理员处理'); loadRoutes(); }
+        if (res) { showToast('已提交审核，请等待管理员处理'); }
+        loadRoutes();
+    });
+}
+
+async function withdrawRoute(id) {
+    showConfirm('确定撤回该线路的审核申请？撤回后回到草稿状态，线路内容保持不变。', async () => {
+        const res = await api('/api/customRoute/withdraw?id=' + id);
+        if (res) { showToast('已撤回到草稿'); }
+        loadRoutes();
     });
 }
 

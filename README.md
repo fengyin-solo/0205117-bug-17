@@ -142,9 +142,10 @@ docker compose up --build -d
 | 端点 | 说明 |
 |------|------|
 | `GET /api/customRoute/list` | 我的自定义线路列表 |
-| `GET /api/customRoute/save?name=&description=&days=&spotData=` | 保存线路 |
-| `GET /api/customRoute/delete?id=` | 删除线路 |
-| `GET /api/customRoute/submitForReview?id=` | 申请官方推荐 |
+| `GET /api/customRoute/save?name=&description=&days=&spotData=` | 保存线路（仅草稿/已驳回可改） |
+| `GET /api/customRoute/delete?id=` | 删除线路（仅草稿/已驳回可删） |
+| `GET /api/customRoute/submitForReview?id=` | 申请官方推荐（提交后不可修改，自动清除历史驳回原因） |
+| `GET /api/customRoute/withdraw?id=` | 撤回审核中的线路回到草稿（内容保持原样） |
 
 ### 客服 & 反馈
 | 端点 | 说明 |
